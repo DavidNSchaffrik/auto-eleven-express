@@ -15,6 +15,53 @@ TARGET_URL = (
 )
 
 
+JS_HELPERS = r"""
+(() => {
+    function deepQuery(root, predicate) {
+        const stack = [root];
+        while (stack.length) {
+            const node = stack.pop();
+            if (!node) continue;
+
+            // If it's an element, test it
+            if (node.nodeType === Node.ELEMENT_NODE) {
+                if (predicate(node)) return node;
+            }
+
+            // Traverse shadow root if present
+            if (node.shadowRoot) {
+                stack.push(node.shadowRoot);
+            }
+
+            // Traverse element children
+            if (node.children && node.children.length) {
+                for (let i = 0; i < node.children.length; i++) {
+                    stack.push(node.children[i]);
+                }
+            } else if (node.childNodes && node.childNodes.length) {
+                for (let i = 0; i < node.childNodes.length; i++) {
+                    const child = node.childNodes[i];
+                    if (child.nodeType === Node.ELEMENT_NODE || child.shadowRoot || (child.childNodes && child.childNodes.length)) {
+                        stack.push(child);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    function findEditor() {
+        const editor = deepQuery(document, el => el.tagName === "QA-ANIMATE-FROM-AUDIO-EDITOR");
+        if (!editor) throw new Error("qa-animate-from-audio-editor not found anywhere");
+        if (!editor.shadowRoot) throw new Error("editor has no shadowRoot");
+        return editor;
+    }
+
+    return { deepQuery, findEditor };
+})();
+"""
+
+
 async def main():
     browser = await uc.start(
         headless=False,
@@ -25,92 +72,79 @@ async def main():
         tab = await browser.get(TARGET_URL, new_tab=True)
         await tab.set_window_state(state="maximized")
 
-        # crude wait for app boot; bump if needed
-        await asyncio.sleep(10)
+        # Wait for the app to boot; bump if needed
+        await asyncio.sleep(20)
 
-        js_click = r"""
-        (() => {
-            function require(el, label) {
-                if (!el) throw new Error("Not found: " + label);
-                return el;
-            }
-            function requireShadow(el, label) {
-                if (!el.shadowRoot) throw new Error("No shadowRoot on: " + label);
-                return el.shadowRoot;
-            }
-
+        # 1) CLICK THUMBNAIL 317 USING DEEP SEARCH
+        js_click_thumb = JS_HELPERS + r"""
+        ;(() => {
             try {
-                // 1) outer shell
-                const host1 = require(
-                    document.querySelector("body > x-app-entry-point-wrapper"),
-                    "x-app-entry-point-wrapper"
-                );
-                const sr1 = requireShadow(host1, "x-app-entry-point-wrapper");
+                const helpers = (function() {
+                    // re-run the helper factory defined above
+                    function deepQuery(root, predicate) {
+                        const stack = [root];
+                        while (stack.length) {
+                            const node = stack.pop();
+                            if (!node) continue;
+                            if (node.nodeType === Node.ELEMENT_NODE && predicate(node)) {
+                                return node;
+                            }
+                            if (node.shadowRoot) stack.push(node.shadowRoot);
+                            if (node.children && node.children.length) {
+                                for (let i = 0; i < node.children.length; i++) {
+                                    stack.push(node.children[i]);
+                                }
+                            } else if (node.childNodes && node.childNodes.length) {
+                                for (let i = 0; i < node.childNodes.length; i++) {
+                                    const child = node.childNodes[i];
+                                    if (child.nodeType === Node.ELEMENT_NODE || child.shadowRoot || (child.childNodes && child.childNodes.length)) {
+                                        stack.push(child);
+                                    }
+                                }
+                            }
+                        }
+                        return null;
+                    }
+                    function findEditor() {
+                        const editor = deepQuery(document, el => el.tagName === "QA-ANIMATE-FROM-AUDIO-EDITOR");
+                        if (!editor) throw new Error("qa-animate-from-audio-editor not found anywhere");
+                        if (!editor.shadowRoot) throw new Error("editor has no shadowRoot");
+                        return editor;
+                    }
+                    return { deepQuery, findEditor };
+                })();
 
-                // 2) app entry
-                const host2 = require(
-                    sr1.querySelector("hz-context-provider-locator > x-app-ui-entry-point"),
-                    "x-app-ui-entry-point"
-                );
-                const sr2 = requireShadow(host2, "x-app-ui-entry-point");
+                const editor = helpers.findEditor();
+                const sr5 = editor.shadowRoot;
 
-                // 3) quick action tools view
-                const host3 = require(
-                    sr2.querySelector("x-quick-action-tools-view"),
-                    "x-quick-action-tools-view"
-                );
-                const sr3 = requireShadow(host3, "x-quick-action-tools-view");
+                const puppets = sr5.querySelector("qa-animate-from-audio-puppets-panel");
+                if (!puppets || !puppets.shadowRoot) {
+                    throw new Error("qa-animate-from-audio-puppets-panel not found / no shadowRoot");
+                }
+                const sr6 = puppets.shadowRoot;
 
-                // 4) quick-action-component
-                const host4 = require(
-                    sr3.querySelector("quick-action-component"),
-                    "quick-action-component"
-                );
-                const sr4 = requireShadow(host4, "quick-action-component");
+                const thumbWrapper = sr6.querySelector("qa-animate-from-audio-thumbnail-grid");
+                if (!thumbWrapper || !thumbWrapper.shadowRoot) {
+                    throw new Error("qa-animate-from-audio-thumbnail-grid not found / no shadowRoot");
+                }
+                const sr7 = thumbWrapper.shadowRoot;
 
-                // 5) main editor
-                const host5 = require(
-                    sr4.querySelector("qa-app-root > qa-app > qa-animate-from-audio-editor"),
-                    "qa-animate-from-audio-editor"
-                );
-                const sr5 = requireShadow(host5, "qa-animate-from-audio-editor");
+                const grid = sr7.querySelector("qa-thumbnail-grid");
+                if (!grid || !grid.shadowRoot) {
+                    throw new Error("qa-thumbnail-grid not found / no shadowRoot");
+                }
+                const sr8 = grid.shadowRoot;
 
-                // 6) puppets panel (DON'T use random #sp-tab-panel-... ID)
-                const host6 = require(
-                    sr5.querySelector("qa-animate-from-audio-puppets-panel"),
-                    "qa-animate-from-audio-puppets-panel"
-                );
-                const sr6 = requireShadow(host6, "qa-animate-from-audio-puppets-panel");
+                const thumb = sr8.querySelector("qa-thumbnail:nth-child(317)");
+                if (!thumb || !thumb.shadowRoot) {
+                    throw new Error("qa-thumbnail:nth-child(317) not found / no shadowRoot");
+                }
+                const thumbSr = thumb.shadowRoot;
 
-                // 7) thumbnail grid wrapper
-                const host7 = require(
-                    sr6.querySelector("qa-animate-from-audio-thumbnail-grid"),
-                    "qa-animate-from-audio-thumbnail-grid"
-                );
-                const sr7 = requireShadow(host7, "qa-animate-from-audio-thumbnail-grid");
-
-                // 8) inner qa-thumbnail-grid
-                const host8 = require(
-                    sr7.querySelector("qa-thumbnail-grid"),
-                    "qa-thumbnail-grid"
-                );
-                const sr8 = requireShadow(host8, "qa-thumbnail-grid");
-
-                // 9) the nth thumbnail
-                const thumb = require(
-                    sr8.querySelector("qa-thumbnail:nth-child(317)"),
-                    "qa-thumbnail:nth-child(317)"
-                );
-                const thumbSr = requireShadow(thumb, "qa-thumbnail:nth-child(317)");
-
-                // 10) button inside thumbnail
-                const btn = require(
-                    thumbSr.querySelector("button"),
-                    "thumbnail button"
-                );
+                const btn = thumbSr.querySelector("button");
+                if (!btn) throw new Error("thumbnail button not found");
 
                 btn.click();
-
                 return { ok: true };
             } catch (e) {
                 return { ok: false, reason: String(e) };
@@ -118,10 +152,83 @@ async def main():
         })();
         """
 
-        result = await tab.evaluate(js_click, return_by_value=True)
-        print("Click result:", result)
+        click_result = await tab.evaluate(js_click_thumb, return_by_value=True)
+        print("Thumbnail click result:", click_result)
 
-        # keep browser open so you can see the result
+        await asyncio.sleep(3)
+
+        # 2) SET CHARACTER SCALE TO 42% (value = 0.42)
+        js_set_scale = JS_HELPERS + r"""
+        ;(() => {
+            try {
+                const helpers = (function() {
+                    function deepQuery(root, predicate) {
+                        const stack = [root];
+                        while (stack.length) {
+                            const node = stack.pop();
+                            if (!node) continue;
+                            if (node.nodeType === Node.ELEMENT_NODE && predicate(node)) {
+                                return node;
+                            }
+                            if (node.shadowRoot) stack.push(node.shadowRoot);
+                            if (node.children && node.children.length) {
+                                for (let i = 0; i < node.children.length; i++) {
+                                    stack.push(node.children[i]);
+                                }
+                            } else if (node.childNodes && node.childNodes.length) {
+                                for (let i = 0; i < node.childNodes.length; i++) {
+                                    const child = node.childNodes[i];
+                                    if (child.nodeType === Node.ELEMENT_NODE || child.shadowRoot || (child.childNodes && child.childNodes.length)) {
+                                        stack.push(child);
+                                    }
+                                }
+                            }
+                        }
+                        return null;
+                    }
+                    function findEditor() {
+                        const editor = deepQuery(document, el => el.tagName === "QA-ANIMATE-FROM-AUDIO-EDITOR");
+                        if (!editor) throw new Error("qa-animate-from-audio-editor not found anywhere");
+                        if (!editor.shadowRoot) throw new Error("editor has no shadowRoot");
+                        return editor;
+                    }
+                    return { deepQuery, findEditor };
+                })();
+
+                const editor = helpers.findEditor();
+                const sr5 = editor.shadowRoot;
+
+                const puppets = sr5.querySelector("qa-animate-from-audio-puppets-panel");
+                if (!puppets || !puppets.shadowRoot) {
+                    throw new Error("qa-animate-from-audio-puppets-panel not found / no shadowRoot");
+                }
+                const sr6 = puppets.shadowRoot;
+
+                const sliderHost = sr6.querySelector("#puppet-scale-slider");
+                if (!sliderHost || !sliderHost.shadowRoot) {
+                    throw new Error("#puppet-scale-slider not found / no shadowRoot");
+                }
+                const sliderSr = sliderHost.shadowRoot;
+
+                const input = sliderSr.querySelector('input[aria-label="Character scale"]');
+                if (!input) {
+                    throw new Error('input[aria-label="Character scale"] not found');
+                }
+
+                input.value = "0.42";
+                input.dispatchEvent(new Event("input", { bubbles: true }));
+                input.dispatchEvent(new Event("change", { bubbles: true }));
+
+                return { ok: true, value: input.value };
+            } catch (e) {
+                return { ok: false, reason: String(e) };
+            }
+        })();
+        """
+
+        scale_result = await tab.evaluate(js_set_scale, return_by_value=True)
+        print("Scale set result:", scale_result)
+
         await asyncio.sleep(10)
 
     finally:
